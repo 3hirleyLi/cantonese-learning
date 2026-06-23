@@ -447,15 +447,45 @@
         // ===== 雲端同步（GitHub Gist） =====
         const GIST_ID_KEY = 'hk_gist_id';
 
+        async function gistApi(url, method, token, body) {
+            const headers = {
+                'Accept': 'application/vnd.github+json',
+                'Authorization': `Bearer ${token}`,
+                'X-GitHub-Api-Version': '2022-11-28'
+            };
+            if (body) headers['Content-Type'] = 'application/json';
+
+            const res = await fetch(url, {
+                method: method,
+                headers: headers,
+                body: body ? JSON.stringify(body) : undefined
+            });
+
+            if (!res.ok) {
+                let errMsg = `HTTP ${res.status}`;
+                try {
+                    const errJson = await res.json();
+                    errMsg = errJson.message || errMsg;
+                } catch(e) {}
+                throw new Error(errMsg);
+            }
+            return res;
+        }
+
         async function getGistId(token) {
             const cached = localStorage.getItem(GIST_ID_KEY);
-            if (cached) return cached;
+            if (cached) {
+                // 驗證快取的 gist 是否仍存在
+                try {
+                    await gistApi(`https://api.github.com/gists/${cached}`, 'GET', token);
+                    return cached;
+                } catch(e) {
+                    localStorage.removeItem(GIST_ID_KEY);
+                }
+            }
 
             // 搜尋已有的 gist
-            const res = await fetch('https://api.github.com/gists?per_page=100', {
-                headers: { 'Authorization': `token ${token}`, 'Accept': 'application/vnd.github+json' }
-            });
-            if (!res.ok) throw new Error('無法取得 Gist 列表');
+            const res = await gistApi('https://api.github.com/gists?per_page=100', 'GET', token);
             const gists = await res.json();
             const found = gists.find(g => g.description === '粵語學習中心-雲端同步');
             if (found) {
@@ -467,7 +497,10 @@
 
         async function syncToCloud() {
             const token = localStorage.getItem('github_token');
-            if (!token) { alert('請先在「API 設定」中填寫 GitHub Token！\n\n需要一個有 gist 權限的 Personal Access Token。\n\n建立方式：GitHub → Settings → Developer settings → Personal access tokens → 勾選 gist 權限'); return; }
+            if (!token) {
+                alert('請先在「API 設定」中填寫 GitHub Token！\n\n📋 建立方式：\n1. 打開 https://github.com/settings/tokens?type=beta\n2. Generate new token\n3. 名稱隨便填（如 cantonese-sync）\n4. 權限只需勾選 ✅ Gist → Read and Write\n5. 複製 Token 貼到這裡');
+                return;
+            }
 
             const syncData = {
                 bookmarks: bookmarks,
@@ -476,6 +509,10 @@
             };
 
             try {
+                // 先測試 Token 是否有效
+                const testRes = await gistApi('https://api.github.com/gists?per_page=1', 'GET', token);
+                // Token 有效，繼續
+
                 const gistId = await getGistId(token);
                 const body = {
                     description: '粵語學習中心-雲端同步',
@@ -485,31 +522,22 @@
 
                 let res;
                 if (gistId) {
-                    // 更新現有 gist
-                    res = await fetch(`https://api.github.com/gists/${gistId}`, {
-                        method: 'PATCH',
-                        headers: { 'Authorization': `token ${token}`, 'Accept': 'application/vnd.github+json', 'Content-Type': 'application/json' },
-                        body: JSON.stringify(body)
-                    });
+                    res = await gistApi(`https://api.github.com/gists/${gistId}`, 'PATCH', token, body);
                 } else {
-                    // 建立新 gist
-                    res = await fetch('https://api.github.com/gists', {
-                        method: 'POST',
-                        headers: { 'Authorization': `token ${token}`, 'Accept': 'application/vnd.github+json', 'Content-Type': 'application/json' },
-                        body: JSON.stringify(body)
-                    });
+                    res = await gistApi('https://api.github.com/gists', 'POST', token, body);
                     const data = await res.json();
                     localStorage.setItem(GIST_ID_KEY, data.id);
                 }
 
-                if (!res.ok) {
-                    const err = await res.json().catch(() => ({}));
-                    throw new Error(err.message || `上傳失敗 (${res.status})`);
-                }
-                alert('☁️ 同步成功！生詞本和字卡已上傳到雲端。');
+                alert('☁️ 同步成功！生詞本和字卡已上傳到雲端。\n\n在其他設備上點「⬇️ 下載同步」即可取得。');
             } catch (error) {
-                console.error(error);
-                alert(`❌ 上傳失敗：${error.message}`);
+                console.error('syncToCloud error:', error);
+                let hint = '';
+                if (error.message.includes('401')) hint = '\n\n💡 Token 無效或已過期，請重新建立。';
+                else if (error.message.includes('403')) hint = '\n\n💡 Token 權限不足，需要 gist 讀寫權限。';
+                else if (error.message.includes('404')) hint = '\n\n💡 Gist 不存在，已清除快取，請重試。';
+                else if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) hint = '\n\n💡 網路連線問題，請檢查網路。';
+                alert(`❌ 上傳失敗：${error.message}${hint}`);
             }
         }
 
@@ -519,17 +547,13 @@
 
             try {
                 const gistId = await getGistId(token);
-                if (!gistId) { alert('雲端還沒有同步資料，請先在其他設備上傳同步。'); return; }
+                if (!gistId) { alert('雲端還沒有同步資料。\n\n請先在其他設備上點「☁️ 上傳同步」。'); return; }
 
-                const res = await fetch(`https://api.github.com/gists/${gistId}`, {
-                    headers: { 'Authorization': `token ${token}`, 'Accept': 'application/vnd.github+json' }
-                });
-                if (!res.ok) throw new Error(`下載失敗 (${res.status})`);
-
+                const res = await gistApi(`https://api.github.com/gists/${gistId}`, 'GET', token);
                 const data = await res.json();
                 const content = JSON.parse(data.files['cantonese_sync.json'].content);
 
-                if (!confirm(`⬇️ 找到雲端資料（同步時間：${new Date(content.syncedAt).toLocaleString('zh-HK')}）\n\n雲端有 ${content.bookmarks?.length || 0} 個生詞、${content.cards?.length || 0} 張字卡\n\n要覆蓋本地資料嗎？`)) return;
+                if (!confirm(`⬇️ 找到雲端資料\n\n📅 同步時間：${new Date(content.syncedAt).toLocaleString('zh-HK')}\n⭐ 生詞：${content.bookmarks?.length || 0} 個\n🗂️ 字卡：${content.cards?.length || 0} 張\n\n要覆蓋本地資料嗎？`)) return;
 
                 if (content.bookmarks) {
                     bookmarks = content.bookmarks;
@@ -544,8 +568,12 @@
                 updateStats();
                 alert('✅ 雲端資料已下載到本地！');
             } catch (error) {
-                console.error(error);
-                alert(`❌ 下載失敗：${error.message}`);
+                console.error('syncFromCloud error:', error);
+                let hint = '';
+                if (error.message.includes('401')) hint = '\n\n💡 Token 無效或已過期。';
+                else if (error.message.includes('403')) hint = '\n\n💡 Token 權限不足。';
+                else if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) hint = '\n\n💡 網路連線問題。';
+                alert(`❌ 下載失敗：${error.message}${hint}`);
             }
         }
 
