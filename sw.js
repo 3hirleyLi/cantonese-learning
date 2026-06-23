@@ -1,9 +1,9 @@
-const CACHE_NAME = 'cantonese-v1';
+const CACHE_NAME = 'cantonese-v2';
 const ASSETS = [
-  '/index.html',
-  '/manifest.json',
-  '/icon-192.png',
-  '/icon-512.png'
+  '/cantonese-learning/index.html',
+  '/cantonese-learning/manifest.json',
+  '/cantonese-learning/icon-192.png',
+  '/cantonese-learning/icon-512.png'
 ];
 
 // 安裝：快取核心資源
