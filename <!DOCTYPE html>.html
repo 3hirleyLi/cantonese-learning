@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>我的粵語情境升級庫 3.3 (優化版)</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <style>
+        /* 基礎卡片樣式 */
+        .card-flip { perspective: 1000px; }
+        .card-inner { transition: transform 0.6s; transform-style: preserve-3d; }
+        .card-front, .card-back { backface-visibility: hidden; position: absolute; top: 0; left: 0; width: 100%; height: 100%; border-radius: 1rem; }
+        
+        /* 背面樣式 */
+        .card-back { transform: rotateY(180deg); }
+        
+        /* 當添加了 .flipped 類時觸發翻轉 */
+        .card-flip.flipped .card-inner { transform: rotateY(180deg); }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen font-sans">
+
+    <div class="max-w-4xl mx-auto px-4 py-8">
+        <header class="text-center mb-8">
+            <h1 class="text-4xl font-extrabold text-slate-800 mb-2">🇭🇰 粵語自主學習中心 3.3</h1>
+            <p class="text-slate-500">直連 豆包大模型 AI 家教 × 內建粵語正音跟讀系統</p>
+        </header>
+
+        <div class="bg-white rounded-2xl shadow-sm p-5 mb-6 border border-slate-100 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">🔑 設置你的 豆包 API Key</label>
+                <input id="apiKeyInput" type="password" placeholder="請貼上在火山引擎申請的 API Key" class="w-full px-4 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">🎯 設置 推理接入點 ID (Endpoint ID)</label>
+                <input id="endpointInput" type="text" placeholder="例如：ep-2026xxxx-xxxx" class="w-full px-4 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+        </div>
+
+        <div class="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl shadow-md p-6 text-white mb-8">
+            <h2 class="text-lg font-bold mb-1 flex items-center gap-2">🔮 點菜式 AI 場景字卡生成 (豆包驅動)</h2>
+            <p class="text-xs text-slate-400 mb-4">輸入你今天遇到的任何真實生活場景，豆包會自動幫你批量生成道地粵語字卡！</p>
+            
+            <div class="flex flex-col sm:flex-row gap-3">
+                <input id="sceneInput" type="text" placeholder="例如：逛街試衣服 看到最新款和打折扣..." class="flex-1 px-4 py-3 rounded-xl bg-slate-700/50 border border-slate-600 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                <button id="aiBtn" onclick="generateAIScene()" class="bg-emerald-500 hover:bg-emerald-600 text-slate-900 font-bold px-6 py-3 rounded-xl transition duration-200 text-sm shadow-lg shadow-emerald-500/20 whitespace-nowrap">
+                    ⚡ 讓 豆包 生成字卡
+                </button>
+            </div>
+        </div>
+
+        <div id="cardGrid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
+            </div>
+    </div>
+
+    <script>
+        let defaultCards = [
+            { word: "去睇Art展", pinyin: "heoi3 tai2 Art zin2 laam5", context: "和朋友去藝術展參觀", meaning: "去看藝術展覽（香港年輕人愛夾雜英文）" },
+            { word: "隨意得嚟又有型", pinyin: "ceoi4 ji3 dak1 lai4 jau5 jing4", context: "藝術展街拍要求", meaning: "外表看起來很隨性，但同時又很有型帥氣" }
+        ];
+
+        let cards = JSON.parse(localStorage.getItem('hk_cards')) || defaultCards;
+
+        // 初始化載入本地緩存的密鑰
+        document.getElementById('apiKeyInput').value = localStorage.getItem('doubao_api_key') || '';
+        document.getElementById('endpointInput').value = localStorage.getItem('doubao_endpoint_id') || '';
+
+        // 監聽變動自動儲存
+        document.getElementById('apiKeyInput').addEventListener('input', (e) => localStorage.setItem('doubao_api_key', e.target.value.trim()));
+        document.getElementById('endpointInput').addEventListener('input', (e) => localStorage.setItem('doubao_endpoint_id', e.target.value.trim()));
+
+        function renderCards() {
+            const grid = document.getElementById('cardGrid');
+            grid.innerHTML = '';
+            cards.forEach((card, index) => {
+                grid.innerHTML += `
+                    <div id="card-${index}" class="card-flip h-48 w-full cursor-pointer relative" onclick="toggleCardFlip(${index})">
+                        <div class="card-inner relative w-full h-full text-center">
+                            <div class="card-front bg-white rounded-2xl border border-slate-100 shadow-sm p-6 flex flex-col justify-between">
+                                <div class="flex justify-between items-start w-full">
+                                    <span class="text-[10px] font-semibold px-2 py-0.5 bg-slate-100 text-slate-600 rounded-md truncate max-w-[70%]">🎬 ${card.context}</span>
+                                    <button onclick="speakCantonese(event, '${card.word}')" class="text-slate-400 hover:text-blue-500 p-1 rounded-full hover:bg-slate-50 transition">🔊</button>
+                                </div>
+                                <h3 class="text-xl font-bold text-slate-800 my-auto">${card.word}</h3>
+                                <p class="text-xs text-slate-400 font-mono truncate">${card.pinyin}</p>
+                            </div>
+                            <div class="card-back bg-slate-800 text-white rounded-2xl p-6 flex flex-col justify-between">
+                                <span class="text-xs text-slate-400 self-start">💡 釋義</span>
+                                <p class="text-base font-medium my-auto px-2">${card.meaning}</p>
+                                <button onclick="deleteCard(event, ${index})" class="text-xs text-red-400 hover:text-red-300 self-end">刪除字卡</button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+
+        function speakCantonese(event, text) {
+            // 在這裡添加關鍵代碼：阻止事件冒泡到卡片上，從而阻止翻轉
+            event.stopPropagation();
+            if ('speechSynthesis' in window) {
+                const cleanText = text.replace(/[a-zA-Z]/g, ''); 
+                const utterance = new SpeechSynthesisUtterance(cleanText);
+                utterance.lang = 'zh-HK';
+                utterance.rate = 0.9;
+                window.speechSynthesis.speak(utterance);
+            }
+        }
+
+        // 新增函數：切換卡片的翻轉狀態
+        function toggleCardFlip(index) {
+            const card = document.getElementById(`card-${index}`);
+            if(card) {
+                card.classList.toggle('flipped');
+            }
+        }
+
+        async function generateAIScene() {
+            const apiKey = localStorage.getItem('doubao_api_key');
+            const endpointId = localStorage.getItem('doubao_endpoint_id');
+            const scene = document.getElementById('sceneInput').value.trim();
+            const btn = document.getElementById('aiBtn');
+
+            if (!apiKey || !endpointId) { alert('請確保「豆包 API Key」和「推理接入點 ID」都填寫囉！'); return; }
+            if (!scene) { alert('請輸入你想學習的場景！'); return; }
+
+            btn.disabled = true;
+            btn.innerText = "🔮 豆包正在為您量身打造字卡...";
+
+            const systemPrompt = `你是一位土生土長的香港人，同時也是一位幽默風趣的高級粵語老師。
+請針對用戶提供的生活場景，提供 4 到 5 個在該場景下最道地、最常聽到、甚至帶點港式網感的粵語詞彙或短句。
+必須嚴格使用繁體中文，且只返回一個標準的 JSON 陣列格式，不要包含任何 markdown 標記（如 \`\`\`json）：
+[
+  {
+    "word": "道地粵語漢字",
+    "pinyin": "提供拼音，並在括號內附帶普通話諧音空耳",
+    "context": "使用小語境",
+    "meaning": "普通話詳細意思"
+  }
+]`;
+
+            try {
+                const url = "https://ark.cn-beijing.volces.com/api/v3/chat/completions";
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${apiKey}`
+                    },
+                    body: JSON.stringify({
+                        model: endpointId,
+                        messages: [
+                            { role: "system", content: systemPrompt },
+                            { role: "user", content: `用戶指定的場景是：「${scene}」` }
+                        ]
+                    })
+                });
+
+                if (!response.ok) {
+                    const errData = await response.json().catch(() => ({}));
+                    throw new Error(`火山引擎拒絕請求 (狀態碼 ${response.status})\n原因: ${errData.error?.message || '請檢查 API Key 或接入點 ID 是否填錯。'}`);
+                }
+
+                const data = await response.json();
+                let rawText = data.choices[0].message.content.trim();
+                
+                if (rawText.startsWith("```")) {
+                    rawText = rawText.replace(/^```json\s*/i, "").replace(/```$/, "").trim();
+                }
+
+                const newCards = JSON.parse(rawText);
+                if (Array.isArray(newCards)) {
+                    // 將新生成的字卡添加到最前面
+                    cards = [...newCards, ...cards];
+                    saveAndRenderCards();
+                    document.getElementById('sceneInput').value = '';
+                    alert(`🎉 豆包成功為你生成了 ${newCards.length} 張「${scene}」字卡！已將卡片翻轉改為「點擊」，點🔊只發音不轉身！`);
+                } else {
+                    throw new Error("數據格式不正確，無法解析為字卡。");
+                }
+
+            } catch (error) {
+                console.error(error);
+                alert(`❌ 發生錯誤啦！\n\n${error.message}`);
+            } finally {
+                btn.disabled = false;
+                btn.innerText = "⚡ 讓 豆包 生成字卡";
+            }
+        }
+
+        function deleteCard(event, index) {
+            // 在這裡添加關鍵代碼：阻止事件冒泡到卡片上，從而阻止刪除時觸發卡片翻轉
+            event.stopPropagation();
+            if(confirm('確定要刪除這張字卡嗎？')) {
+                cards.splice(index, 1);
+                saveAndRenderCards();
+            }
+        }
+
+        // 統一的保存並重新渲染函數
+        function saveAndRenderCards() {
+            localStorage.setItem('hk_cards', JSON.stringify(cards));
+            renderCards();
+        }
+
+        renderCards();
+    </script>
+</body>
+</html>

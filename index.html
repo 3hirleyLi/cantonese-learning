@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="粵語學習">
+    <meta name="theme-color" content="#0f172a">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    <title>我的粵語情境升級庫 3.5</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <style>
+        /* 基礎卡片樣式 */
+        .card-flip { perspective: 1000px; }
+        .card-inner { transition: transform 0.6s; transform-style: preserve-3d; }
+        .card-front, .card-back { backface-visibility: hidden; position: absolute; top: 0; left: 0; width: 100%; height: 100%; border-radius: 1rem; }
+        .card-back { transform: rotateY(180deg); }
+        .card-flip.flipped .card-inner { transform: rotateY(180deg); }
+
+        /* 生詞本面板 */
+        .vocab-panel {
+            transform: translateX(100%);
+            transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .vocab-panel.open {
+            transform: translateX(0);
+        }
+        .vocab-overlay {
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s;
+        }
+        .vocab-overlay.open {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        /* 收藏動畫 */
+        @keyframes bookmarkPop {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.4); }
+            100% { transform: scale(1); }
+        }
+        .bookmark-pop { animation: bookmarkPop 0.3s ease; }
+
+        /* 底部導航 */
+        .bottom-nav {
+            padding-bottom: env(safe-area-inset-bottom, 0px);
+        }
+
+        /* 滾動條美化 */
+        .vocab-list::-webkit-scrollbar { width: 4px; }
+        .vocab-list::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 2px; }
+
+        /* 觸控優化 */
+        @media (hover: none) {
+            .card-flip { -webkit-tap-highlight-color: transparent; }
+        }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen font-sans pb-20">
+
+    <div class="max-w-4xl mx-auto px-4 py-6 sm:py-8">
+        <header class="text-center mb-6">
+            <h1 class="text-2xl sm:text-4xl font-extrabold text-slate-800 mb-1">🇭🇰 粵語自主學習中心</h1>
+            <p class="text-xs sm:text-sm text-slate-500">豆包 AI 家教 × 粵語正音 × 生詞本</p>
+        </header>
+
+        <!-- API 設置區 -->
+        <details class="bg-white rounded-2xl shadow-sm mb-5 border border-slate-100">
+            <summary class="p-4 cursor-pointer text-sm font-bold text-slate-700 flex items-center gap-2">
+                ⚙️ API 設定
+                <span class="text-xs font-normal text-slate-400 ml-auto">點擊展開</span>
+            </summary>
+            <div class="px-4 pb-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">🔑 豆包 API Key</label>
+                    <input id="apiKeyInput" type="password" placeholder="火山引擎 API Key" class="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-slate-700 mb-1">🎯 推理接入點 ID</label>
+                    <input id="endpointInput" type="text" placeholder="例如：ep-2026xxxx-xxxx" class="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+            </div>
+        </details>
+
+        <!-- AI 場景生成 -->
+        <div class="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl shadow-md p-4 sm:p-6 text-white mb-6">
+            <h2 class="text-base sm:text-lg font-bold mb-1 flex items-center gap-2">🔮 AI 場景字卡生成</h2>
+            <p class="text-[11px] sm:text-xs text-slate-400 mb-3">輸入生活場景，豆包自動生成道地粵語字卡</p>
+            <div class="flex flex-col sm:flex-row gap-2">
+                <input id="sceneInput" type="text" placeholder="例如：逛街試衣服 看到最新款和打折扣..." class="flex-1 px-4 py-3 rounded-xl bg-slate-700/50 border border-slate-600 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-400">
+                <button id="aiBtn" onclick="generateAIScene()" class="bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 text-slate-900 font-bold px-5 py-3 rounded-xl transition duration-200 text-sm shadow-lg shadow-emerald-500/20 whitespace-nowrap">
+                    ⚡ 生成字卡
+                </button>
+            </div>
+        </div>
+
+        <!-- 統計欄 -->
+        <div class="flex items-center justify-between mb-4 px-1">
+            <span class="text-xs text-slate-500">📚 共 <strong id="totalCards">0</strong> 張字卡</span>
+            <span class="text-xs text-slate-500">⭐ 已收藏 <strong id="totalBookmarked">0</strong> 個生詞</span>
+        </div>
+
+        <!-- 字卡網格 -->
+        <div id="cardGrid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 sm:gap-6"></div>
+    </div>
+
+    <!-- 底部導航 -->
+    <nav class="bottom-nav fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-lg border-t border-slate-200 z-40">
+        <div class="max-w-4xl mx-auto flex">
+            <button onclick="switchTab('cards')" id="tabCards" class="flex-1 py-3 flex flex-col items-center gap-0.5 text-emerald-600 font-bold text-xs transition">
+                <span class="text-lg">🗂️</span>
+                <span>字卡</span>
+            </button>
+            <button onclick="switchTab('vocab')" id="tabVocab" class="flex-1 py-3 flex flex-col items-center gap-0.5 text-slate-400 text-xs transition">
+                <span class="text-lg">📖</span>
+                <span>生詞本</span>
+            </button>
+        </div>
+    </nav>
+
+    <!-- 生詞本面板 -->
+    <div id="vocabOverlay" class="vocab-overlay fixed inset-0 bg-black/40 z-50" onclick="closeVocabPanel()"></div>
+    <div id="vocabPanel" class="vocab-panel fixed top-0 right-0 bottom-0 w-full sm:w-96 bg-white z-50 flex flex-col shadow-2xl">
+        <div class="flex items-center justify-between p-4 border-b border-slate-100">
+            <h2 class="text-lg font-bold text-slate-800">📖 我的生詞本</h2>
+            <button onclick="closeVocabPanel()" class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-slate-100 text-slate-500 text-lg">✕</button>
+        </div>
+        <!-- 搜尋 -->
+        <div class="px-4 pt-3 pb-2">
+            <input id="vocabSearch" type="text" placeholder="🔍 搜尋生詞..." oninput="renderVocabList()" class="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-400">
+        </div>
+        <!-- 生詞列表 -->
+        <div id="vocabList" class="vocab-list flex-1 overflow-y-auto px-4 pb-24"></div>
+        <!-- 生詞本底部操作 -->
+        <div class="p-4 border-t border-slate-100 bg-slate-50">
+            <button onclick="exportVocab()" class="w-full py-2.5 bg-slate-800 text-white text-sm font-bold rounded-xl active:bg-slate-700 transition">📤 匯出生詞本</button>
+        </div>
+    </div>
+
+    <script>
+        // ===== 資料管理 =====
+        let defaultCards = [
+            { word: "去睇Art展", pinyin: "heoi3 tai2 Art zin2 laam5", context: "和朋友去藝術展參觀", meaning: "去看藝術展覽（香港年輕人愛夾雜英文）" },
+            { word: "隨意得嚟又有型", pinyin: "ceoi4 ji3 dak1 lai4 jau5 jing4", context: "藝術展街拍要求", meaning: "外表看起來很隨性，但同時又很有型帥氣" }
+        ];
+
+        let cards = JSON.parse(localStorage.getItem('hk_cards')) || defaultCards;
+        let bookmarks = JSON.parse(localStorage.getItem('hk_bookmarks')) || [];
+
+        // 初始化載入本地緩存的密鑰
+        document.getElementById('apiKeyInput').value = localStorage.getItem('doubao_api_key') || '';
+        document.getElementById('endpointInput').value = localStorage.getItem('doubao_endpoint_id') || '';
+
+        // 監聽變動自動儲存
+        document.getElementById('apiKeyInput').addEventListener('input', (e) => localStorage.setItem('doubao_api_key', e.target.value.trim()));
+        document.getElementById('endpointInput').addEventListener('input', (e) => localStorage.setItem('doubao_endpoint_id', e.target.value.trim()));
+
+        // ===== 生詞本功能 =====
+        function isBookmarked(word) {
+            return bookmarks.some(b => b.word === word);
+        }
+
+        function toggleBookmark(event, index) {
+            event.stopPropagation();
+            const card = cards[index];
+            const idx = bookmarks.findIndex(b => b.word === card.word);
+            if (idx > -1) {
+                bookmarks.splice(idx, 1);
+            } else {
+                bookmarks.push({ ...card, addedAt: Date.now() });
+            }
+            localStorage.setItem('hk_bookmarks', JSON.stringify(bookmarks));
+            renderCards();
+            updateStats();
+
+            // 收藏動畫
+            const btn = event.currentTarget;
+            btn.classList.add('bookmark-pop');
+            setTimeout(() => btn.classList.remove('bookmark-pop'), 300);
+        }
+
+        function removeBookmark(event, word) {
+            event.stopPropagation();
+            bookmarks = bookmarks.filter(b => b.word !== word);
+            localStorage.setItem('hk_bookmarks', JSON.stringify(bookmarks));
+            renderVocabList();
+            renderCards();
+            updateStats();
+        }
+
+        function renderVocabList() {
+            const list = document.getElementById('vocabList');
+            const search = document.getElementById('vocabSearch').value.trim().toLowerCase();
+            let filtered = bookmarks;
+            if (search) {
+                filtered = bookmarks.filter(b =>
+                    b.word.toLowerCase().includes(search) ||
+                    b.meaning.toLowerCase().includes(search) ||
+                    b.context.toLowerCase().includes(search)
+                );
+            }
+
+            if (filtered.length === 0) {
+                list.innerHTML = `
+                    <div class="text-center py-12 text-slate-400">
+                        <p class="text-4xl mb-3">${search ? '🔍' : '📖'}</p>
+                        <p class="text-sm">${search ? '找不到匹配的生詞' : '還沒有收藏任何生詞'}</p>
+                        <p class="text-xs mt-1">${search ? '試試其他關鍵字' : '點擊字卡上的 ⭐ 即可收藏'}</p>
+                    </div>
+                `;
+                return;
+            }
+
+            list.innerHTML = filtered.map((b, i) => `
+                <div class="flex items-start gap-3 py-3 ${i > 0 ? 'border-t border-slate-100' : ''}">
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-center gap-2">
+                            <span class="font-bold text-slate-800 text-base">${b.word}</span>
+                            <button onclick="speakCantonese(event, '${b.word}')" class="text-slate-400 hover:text-blue-500 text-sm active:text-blue-600">🔊</button>
+                        </div>
+                        <p class="text-[11px] text-slate-400 font-mono mt-0.5">${b.pinyin || ''}</p>
+                        <p class="text-xs text-slate-500 mt-1">${b.meaning}</p>
+                        <span class="text-[10px] text-slate-400 mt-1 inline-block">🎬 ${b.context || ''}</span>
+                    </div>
+                    <button onclick="removeBookmark(event, '${b.word}')" class="text-slate-300 hover:text-red-400 active:text-red-500 text-lg p-1 shrink-0" title="移除收藏">✕</button>
+                </div>
+            `).join('');
+        }
+
+        function openVocabPanel() {
+            document.getElementById('vocabPanel').classList.add('open');
+            document.getElementById('vocabOverlay').classList.add('open');
+            document.getElementById('vocabSearch').value = '';
+            renderVocabList();
+        }
+
+        function closeVocabPanel() {
+            document.getElementById('vocabPanel').classList.remove('open');
+            document.getElementById('vocabOverlay').classList.remove('open');
+        }
+
+        function exportVocab() {
+            if (bookmarks.length === 0) { alert('生詞本是空的哦！'); return; }
+            let text = '📖 我的粵語生詞本\n exported: ' + new Date().toLocaleDateString('zh-HK') + '\n\n';
+            text += bookmarks.map((b, i) =>
+                `${i + 1}. ${b.word}\n   拼音：${b.pinyin || '-'}\n   釋義：${b.meaning}\n   場景：${b.context || '-'}\n`
+            ).join('\n');
+            
+            // 嘗試複製到剪貼簿
+            if (navigator.clipboard) {
+                navigator.clipboard.writeText(text).then(() => alert('✅ 已複製生詞本到剪貼簿！')).catch(() => fallbackExport(text));
+            } else {
+                fallbackExport(text);
+            }
+        }
+
+        function fallbackExport(text) {
+            const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = '粵語生詞本.txt'; a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        // ===== 底部導航切換 =====
+        function switchTab(tab) {
+            const tabCards = document.getElementById('tabCards');
+            const tabVocab = document.getElementById('tabVocab');
+            if (tab === 'cards') {
+                tabCards.className = 'flex-1 py-3 flex flex-col items-center gap-0.5 text-emerald-600 font-bold text-xs transition';
+                tabVocab.className = 'flex-1 py-3 flex flex-col items-center gap-0.5 text-slate-400 text-xs transition';
+                closeVocabPanel();
+            } else {
+                tabCards.className = 'flex-1 py-3 flex flex-col items-center gap-0.5 text-slate-400 text-xs transition';
+                tabVocab.className = 'flex-1 py-3 flex flex-col items-center gap-0.5 text-emerald-600 font-bold text-xs transition';
+                openVocabPanel();
+            }
+        }
+
+        // ===== 統計更新 =====
+        function updateStats() {
+            document.getElementById('totalCards').textContent = cards.length;
+            document.getElementById('totalBookmarked').textContent = bookmarks.length;
+        }
+
+        // ===== 字卡渲染 =====
+        function renderCards() {
+            const grid = document.getElementById('cardGrid');
+            grid.innerHTML = '';
+            cards.forEach((card, index) => {
+                const bookmarked = isBookmarked(card.word);
+                grid.innerHTML += `
+                    <div id="card-${index}" class="card-flip h-48 w-full cursor-pointer relative" onclick="toggleCardFlip(${index})">
+                        <div class="card-inner relative w-full h-full text-center">
+                            <div class="card-front bg-white rounded-2xl border border-slate-100 shadow-sm p-4 sm:p-6 flex flex-col justify-between">
+                                <div class="flex justify-between items-start w-full">
+                                    <span class="text-[10px] font-semibold px-2 py-0.5 bg-slate-100 text-slate-600 rounded-md truncate max-w-[60%]">🎬 ${card.context}</span>
+                                    <div class="flex items-center gap-1">
+                                        <button onclick="toggleBookmark(event, ${index})" class="p-1 rounded-full hover:bg-slate-50 active:bg-slate-100 transition text-lg" title="${bookmarked ? '取消收藏' : '加入生詞本'}">${bookmarked ? '⭐' : '☆'}</button>
+                                        <button onclick="speakCantonese(event, '${card.word}')" class="text-slate-400 hover:text-blue-500 active:text-blue-600 p-1 rounded-full hover:bg-slate-50 transition">🔊</button>
+                                    </div>
+                                </div>
+                                <h3 class="text-lg sm:text-xl font-bold text-slate-800 my-auto">${card.word}</h3>
+                                <p class="text-[11px] sm:text-xs text-slate-400 font-mono truncate">${card.pinyin}</p>
+                            </div>
+                            <div class="card-back bg-slate-800 text-white rounded-2xl p-4 sm:p-6 flex flex-col justify-between">
+                                <span class="text-xs text-slate-400 self-start">💡 釋義</span>
+                                <p class="text-sm sm:text-base font-medium my-auto px-2">${card.meaning}</p>
+                                <div class="flex items-center justify-between">
+                                    <button onclick="toggleBookmark(event, ${index})" class="text-xs ${bookmarked ? 'text-yellow-400' : 'text-slate-500'} hover:text-yellow-300 active:text-yellow-200">${bookmarked ? '⭐ 已收藏' : '☆ 收藏'}</button>
+                                    <button onclick="deleteCard(event, ${index})" class="text-xs text-red-400 hover:text-red-300 active:text-red-200">刪除</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            updateStats();
+        }
+
+        // ===== 發音 =====
+        function speakCantonese(event, text) {
+            event.stopPropagation();
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel();
+                const cleanText = text.replace(/[a-zA-Z]/g, '');
+                const utterance = new SpeechSynthesisUtterance(cleanText);
+                utterance.lang = 'zh-HK';
+                utterance.rate = 0.9;
+                window.speechSynthesis.speak(utterance);
+            }
+        }
+
+        // ===== 翻轉 =====
+        function toggleCardFlip(index) {
+            const card = document.getElementById(`card-${index}`);
+            if (card) card.classList.toggle('flipped');
+        }
+
+        // ===== AI 生成 =====
+        async function generateAIScene() {
+            const apiKey = localStorage.getItem('doubao_api_key');
+            const endpointId = localStorage.getItem('doubao_endpoint_id');
+            const scene = document.getElementById('sceneInput').value.trim();
+            const btn = document.getElementById('aiBtn');
+
+            if (!apiKey || !endpointId) { alert('請先展開「API 設定」填寫 API Key 和接入點 ID！'); return; }
+            if (!scene) { alert('請輸入你想學習的場景！'); return; }
+
+            btn.disabled = true;
+            btn.innerText = "🔮 生成中...";
+
+            const systemPrompt = `你是一位土生土長的香港人，同時也是一位幽默風趣的高級粵語老師。
+請針對用戶提供的生活場景，提供 4 到 5 個在該場景下最道地、最常聽到、甚至帶點港式網感的粵語詞彙或短句。
+必須嚴格使用繁體中文，且只返回一個標準的 JSON 陣列格式，不要包含任何 markdown 標記（如 \`\`\`json）：
+[
+  {
+    "word": "道地粵語漢字",
+    "pinyin": "提供拼音，並在括號內附帶普通話諧音空耳",
+    "context": "使用小語境",
+    "meaning": "普通話詳細意思"
+  }
+]`;
+
+            try {
+                const url = "https://ark.cn-beijing.volces.com/api/v3/chat/completions";
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${apiKey}`
+                    },
+                    body: JSON.stringify({
+                        model: endpointId,
+                        messages: [
+                            { role: "system", content: systemPrompt },
+                            { role: "user", content: `用戶指定的場景是：「${scene}」` }
+                        ]
+                    })
+                });
+
+                if (!response.ok) {
+                    const errData = await response.json().catch(() => ({}));
+                    throw new Error(`請求失敗 (${response.status})\n${errData.error?.message || '請檢查 API Key 或接入點 ID'}`);
+                }
+
+                const data = await response.json();
+                let rawText = data.choices[0].message.content.trim();
+
+                if (rawText.startsWith("```")) {
+                    rawText = rawText.replace(/^```json\s*/i, "").replace(/```$/, "").trim();
+                }
+
+                const newCards = JSON.parse(rawText);
+                if (Array.isArray(newCards)) {
+                    cards = [...newCards, ...cards];
+                    saveAndRenderCards();
+                    document.getElementById('sceneInput').value = '';
+                    alert(`🎉 成功生成 ${newCards.length} 張「${scene}」字卡！`);
+                } else {
+                    throw new Error("數據格式不正確");
+                }
+            } catch (error) {
+                console.error(error);
+                alert(`❌ 錯誤：${error.message}`);
+            } finally {
+                btn.disabled = false;
+                btn.innerText = "⚡ 生成字卡";
+            }
+        }
+
+        // ===== 刪除字卡 =====
+        function deleteCard(event, index) {
+            event.stopPropagation();
+            if (confirm('確定要刪除這張字卡嗎？')) {
+                cards.splice(index, 1);
+                saveAndRenderCards();
+            }
+        }
+
+        // ===== 儲存並渲染 =====
+        function saveAndRenderCards() {
+            localStorage.setItem('hk_cards', JSON.stringify(cards));
+            renderCards();
+        }
+
+        // ===== PWA Service Worker 註冊 =====
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js').catch(() => {});
+        }
+
+        // ===== 初始化 =====
+        renderCards();
+    </script>
+</body>
+</html>
